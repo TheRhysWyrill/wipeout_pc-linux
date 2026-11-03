@@ -61,9 +61,9 @@ NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 # The game and everything it starts form one process group, ended together (GameJob).
 NEW_GROUP = {} if WINDOWS else {'start_new_session': True}
 UI_FONT, MONO_FONT, SERIF_FONT = 'Segoe UI', 'Consolas', 'Georgia'
-# This build; GitHub release tags are windows-v<VERSION>.
+# This build; GitHub release tags are windows-v<VERSION> and linux-v<VERSION>.
 VERSION = '0.2.52'
-RELEASES_API = 'https://api.github.com/repos/AbdelmoumenDeghbouche/wipeout_pc/releases/latest'
+RELEASES_API = 'https://api.github.com/repos/AbdelmoumenDeghbouche/wipeout_pc/releases?per_page=20'
 RELEASES_PAGE = 'https://github.com/AbdelmoumenDeghbouche/wipeout_pc/releases/latest'
 UPDATE_DIR = Path(tempfile.gettempdir()) / 'gow3-update'
 # Never copied over an installation by an update (the package does not hold them either).
@@ -1356,7 +1356,7 @@ class Launcher:
         root.protocol('WM_DELETE_WINDOW', self.close)
         root.after(100, self.drain_output)
         root.after(500, self.watch_changes)
-        if WINDOWS and self.app['update_popup']:
+        if self.app['update_popup']:  # Windows installs it, Linux opens the release page
             threading.Thread(target=self.check_update, daemon=True).start()
 
     def meta_dir(self):
@@ -1761,10 +1761,11 @@ class Launcher:
         self.play_button.pack(side='right', padx=(self.px(10), self.px(24)), pady=self.px(11))
         self.save_button = ttk.Button(bar, text=_('Save', 'Сохранить'), command=self.save, state='disabled')
         self.save_button.pack(side='right', pady=self.px(11))
-        if WINDOWS:  # next to Save: on the Advanced page players did not find it
-            ttk.Button(bar, text=_('Check for updates', 'Проверить обновления'),
-                       command=lambda: threading.Thread(target=self.check_update, args=(True,), daemon=True).start()
-                       ).pack(side='right', padx=self.px((0, 6)), pady=self.px(11))
+        # Next to Save: on the Advanced page players did not find it. Linux uses it to reach
+        # the release page, since an AppImage is replaced by downloading a new one.
+        ttk.Button(bar, text=_('Check for updates', 'Проверить обновления'),
+                   command=lambda: threading.Thread(target=self.check_update, args=(True,), daemon=True).start()
+                   ).pack(side='right', padx=self.px((0, 6)), pady=self.px(11))
         self.content = tk.Frame(right, bg=PANEL)
         self.content.pack(fill='both', expand=True)
 
@@ -2536,9 +2537,8 @@ class Launcher:
         self.row(f, _('GUI Scale'), self.choice(f, 'ui_scale', 'app', UI_SCALES),
                  _('For launcher only. Applies after Save.'))
         self.check(f, 'close_on_play', 'app', _('Close the launcher when the game starts', 'Закрывать лаунчер при запуске игры'))
-        if WINDOWS:
-            self.check(f, 'update_popup', 'app', _('Check for updates when the launcher opens',
-                                                    'Проверять обновления при открытии лаунчера'))
+        self.check(f, 'update_popup', 'app', _('Check for updates when the launcher opens',
+                                                'Проверять обновления при открытии лаунчера'))
         holder = ttk.Frame(f)
         holder.grid(row=self.next_row(f), column=0, columnspan=2, sticky='w', pady=self.px((10, 0)))
         ttk.Button(holder, text=_('Desktop shortcut', 'Ярлык на рабочем столе'), command=self.shortcut).pack(side='left', padx=self.px((0, 6)))
@@ -3300,10 +3300,12 @@ class Launcher:
         buttons.pack(fill='x', padx=pad, pady=(self.px(14), pad))
         later = ttk.Button(buttons, text=_('Later'), command=win.destroy)
         later.pack(side='right')
-        now = ttk.Button(buttons, text=_('UPDATE NOW'), style='Play.TButton',
+        now = ttk.Button(buttons, text=_('UPDATE NOW') if WINDOWS else _('Release page'), style='Play.TButton',
                          command=lambda: self.install_update(version, url, page))
         now.pack(side='right', padx=(0, self.px(10)))
-        ttk.Button(buttons, text=_('Release page'), style='Link.TButton', command=lambda: open_url(page)).pack(side='left')
+        if WINDOWS:  # Linux already has the blue Release page button
+            ttk.Button(buttons, text=_('Release page'), style='Link.TButton',
+                       command=lambda: open_url(page)).pack(side='left')
         self.update_parts = status, bar, now, later
         win.update_idletasks()  # centred over the launcher
         root = self.root
@@ -3409,6 +3411,10 @@ class Launcher:
             self.messagebox.showinfo(APP_NAME, _('Close the game before updating.', 'Закройте игру перед обновлением.'))
             return
         if not FROZEN:  # a source tree updates with git
+            open_url(page)
+            return
+        if not WINDOWS:
+            # The AppImage is a single file: the release page's download replaces it (README-Linux).
             open_url(page)
             return
         if not url:
@@ -3672,15 +3678,28 @@ def whats_new(body):
 
 
 def latest_release():
-    """(version, zip URL, page URL, what's new) of the newest GitHub release."""
+    """(version, package URL, page URL, what's new) of the newest GitHub release for this
+    platform: the Windows zip, or the Linux AppImage. Linux and Windows releases are separate
+    tags, so the newest one with a matching file is used; a release without one is skipped."""
     request = urllib.request.Request(RELEASES_API, headers={'Accept': 'application/vnd.github+json',
                                                             'User-Agent': 'gow3-launcher'})
     with urllib.request.urlopen(request, timeout=15) as response:
-        release = json.load(response)
-    version = '.'.join(re.findall(r'\d+', release['tag_name']))
-    url = next((asset['browser_download_url'] for asset in release.get('assets', [])
-                if asset.get('name', '').lower().endswith('.zip')), None)
-    return version, url, release.get('html_url') or RELEASES_PAGE, whats_new(release.get('body') or '')
+        releases = json.load(response)
+    suffix = '.zip' if WINDOWS else '.AppImage'
+    # Test builds are pre-releases; they are not offered as updates.
+    stable = [release for release in releases if isinstance(release, dict)
+              and not release.get('draft') and not release.get('prerelease')] if isinstance(releases, list) else []
+    for release in stable:
+        url = next((asset['browser_download_url'] for asset in release.get('assets', [])
+                    if asset.get('name', '').lower().endswith(suffix.lower())), None)
+        if url:
+            version = '.'.join(re.findall(r'\d+', release['tag_name']))
+            return version, url, release.get('html_url') or RELEASES_PAGE, whats_new(release.get('body') or '')
+    if stable:  # no package for this platform yet
+        release = stable[0]
+        version = '.'.join(re.findall(r'\d+', release['tag_name']))
+        return version, None, release.get('html_url') or RELEASES_PAGE, whats_new(release.get('body') or '')
+    raise ValueError('No releases found')
 
 
 def install_update(target, wait_pid):

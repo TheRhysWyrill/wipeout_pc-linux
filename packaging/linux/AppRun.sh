@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# AppImage entry point: starts the frozen Tk launcher. The launcher picks the game folder, runs
-# run.py and handles --play (the game without a window, for Steam and shortcuts).
+# Second half of the AppImage entry point, started by the static AppRun (entry.c) with the host's
+# LD_PRELOAD and other injected library paths already removed. Starts the frozen Tk launcher:
+# the launcher picks the game folder, runs run.py and handles --play (the game without a window,
+# for Steam and shortcuts).
 # Usage: wipeout-x86_64.AppImage [--play]
 set -euo pipefail
 here=$(dirname -- "$(readlink -f -- "$0")")

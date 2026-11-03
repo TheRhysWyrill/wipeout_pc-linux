@@ -18,7 +18,29 @@ For contributors: [build and debug on Windows](docs/windows-debug.md), or option
 2. Open `WipEout.exe`, choose your game folder (the one with `eboot.bin`) and click **PLAY**.
 
 Requirements: Windows 10 or 11 (64-bit), a CPU with AVX, a GPU with Vulkan 1.3. The
-`README-Windows.txt` in the zip has the details. Linux: build from source (below).
+`README-Windows.txt` in the zip has the details.
+
+## Download and play (Linux)
+
+1. Download `wipeout-x86_64.AppImage` from the
+   [latest release](https://github.com/AbdelmoumenDeghbouche/wipeout_pc/releases/latest)
+   (or from the Linux AppImage workflow below) and put it anywhere you can write.
+2. Make it executable and open it:
+
+   ```bash
+   chmod +x wipeout-x86_64.AppImage
+   ./wipeout-x86_64.AppImage
+   ```
+
+3. Choose your game folder (the one with `eboot.bin`) and click **PLAY**.
+
+Requirements: x86-64 Linux with glibc 2.39 or newer (SteamOS 3.7+, Bazzite/Fedora,
+Debian 13, Ubuntu 24.04 or newer), a CPU with AVX and a GPU with Vulkan 1.3. The
+AppImage holds the launcher, the game runtime and its libraries; Python is not needed.
+`./wipeout-x86_64.AppImage --play` starts the game with the saved settings, for Steam and
+shortcuts. Saves and settings live in `~/.local/share/gow3` (`GOW3_DATA_DIR` overrides it).
+The AppImage clears Steam's `LD_PRELOAD` overlay before it starts, so **Add to Steam** in
+the launcher works on SteamOS as it does on a desktop.
 
 > **No game files are included.** You need your own copy of the game, dumped from your own PS4.
 > This project is not affiliated with Sony Interactive Entertainment, XDev, Clever Beans or EPOS
@@ -54,9 +76,9 @@ Thanks to everyone who has played, tested and reported so far!
 | HDR | Done; the darker picture when RCAS runs is fixed, waiting for a test (#4) |
 | Sound: music and effects (Audio3d) | Done; the effects are new, please report anything that sounds wrong |
 | Your own music (custom soundtrack) | Done: see [Your own music](#your-own-music) (#47) |
-| Launcher and settings | Done (`launcher/gow3_launcher_win.py`) |
+| Launcher and settings | Done (`launcher/gow3_launcher_win.py`, Windows and Linux) |
 | Windows package (zip) | Done (`packaging/windows/package.sh`, Actions > Windows zip) |
-| Linux | Builds from source; no package yet |
+| Linux (AppImage) | Built by `packaging/linux/build.sh` and the Actions > Linux AppImage workflow; the launcher, settings, mods, patches, music and the in-game menu are the Windows ones. A full race on a Deck still needs a report |
 | PS4 Pro mode | Experimental (`GOW3_NEO=1`): loads a race with a correct picture since v0.2.3 (#32, #33); not tested further |
 | PSVR mode | Not planned for now (#7) |
 | Every game and event type (HD, HD Fury, 2048) | Not all tested yet |
@@ -93,6 +115,42 @@ the game's own music. Without the launcher, `GOW3_MUSIC_DIR` points to another f
 
 The base game and the update are merged into one folder (the update's files replace the base
 game's). One `eboot.bin` runs all three games: WipEout 2048, WipEout HD and WipEout Fury.
+
+## Building (Linux)
+
+The Linux build uses the same sources and the same launcher as Windows. The AppImage adds
+the frozen launcher (PyInstaller), the game binaries and the libraries that do not have to
+come from the host (glibc, Vulkan, X11/Wayland and audio stay on the system).
+
+1. On Ubuntu 24.04 (the release environment), install the build dependencies and the
+   private Python environment:
+
+   ```bash
+   bash packaging/linux/ci-deps.sh
+   ```
+
+   `ci-deps.sh` installs GCC 14, CMake, Ninja, the SDL3/FFmpeg/Vulkan headers and
+   PyInstaller in `out/venv`. On another distribution, install the packages from
+   [`shell.nix`](shell.nix) and `python3-pyinstaller`, `python3-tk`, `pillow` and
+   `iced-x86==1.21.0` instead.
+2. Clone with submodules, then build the game and the AppImage:
+
+   ```bash
+   git clone --recursive https://github.com/AbdelmoumenDeghbouche/wipeout_pc
+   cd wipeout_pc
+   bash build.sh
+   PATH="$PWD/out/venv/bin:$PATH" bash packaging/linux/build.sh
+   ```
+
+   The result is `dist/wipeout-x86_64.AppImage`. Building on an older distribution is
+   possible, but the AppImage then needs that older glibc; `packaging/linux/build.sh`
+   stops when the bundle needs a newer one than 2.39 (set `GOW3_MAX_GLIBC` to raise the
+   limit for a local build).
+3. The release workflow is **Actions > Linux AppImage > Run workflow**. With no tag it
+   builds and smoke-tests the AppImage on Debian 13, Fedora 42, Ubuntu 24.04, Arch and
+   openSUSE and keeps it as an artifact. A tag publishes it as a release (an existing tag
+   replaces its AppImage). A `linux-v*` tag pushed to the repository builds and publishes
+   it automatically.
 
 ## Building (Windows)
 
@@ -145,6 +203,12 @@ Start the launcher, choose your game folder on the **Game** page, then click **P
 
 ```powershell
 python launcher\gow3_launcher_win.py
+```
+
+On Linux the AppImage starts the same launcher; from a source checkout:
+
+```bash
+python3 launcher/gow3_launcher_win.py
 ```
 
 The **Advanced** page can put a shortcut on the desktop. Settings: display mode, frame rate

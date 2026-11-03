@@ -14,7 +14,8 @@ mkdir -p "$share/bin/gpu" "$appdir/usr/lib"
 
 install -m755 out/gow3-probe out/gow3-gpu-capabilities "$share/bin/"
 install -m755 out/gpu/libgow3gpu.so "$share/bin/gpu/"
-cp run.py "$share/"
+cp run.py LICENSE README.md "$share/"
+install -m644 packaging/linux/README-Linux.txt "$share/"
 cp -r scripts patches "$share/"
 mkdir -p "$share/launcher"
 # The icon of the AppImage, the launcher and the game window: packaging/linux/gow3.png when it
@@ -29,19 +30,38 @@ install -m644 launcher/OFL-RussoOne.txt "$share/launcher/OFL-RussoOne.txt"
 # Windows: the standard modules those scripts import come along as hidden imports.
 # iced-x86 (pip install iced-x86==1.21.0): scripts/isa_rewrite.py, CPUs without MOVBE/BMI1/LZCNT.
 hidden=()
-for module in argparse base64 collections hashlib json re shutil struct tempfile xml.etree.ElementTree \
-              urllib.request iced_x86; do
+for module in argparse base64 collections hashlib json re shutil socket struct tempfile threading \
+              uuid xml.etree.ElementTree urllib.request iced_x86; do
     hidden+=(--hidden-import "$module")
 done
 python3 -c 'import iced_x86' || { echo 'Need iced-x86: pip install iced-x86==1.21.0' >&2; exit 1; }
-python3 -m PyInstaller --noconfirm --clean --log-level WARN --windowed --name gow3-launcher \
-    --distpath out/pyi-dist --workpath out/pyi-work --specpath out/pyi-work \
+python3 -m PyInstaller --noconfirm --clean --log-level WARN --windowed --copy-metadata pillow \
+    --name gow3-launcher --distpath out/pyi-dist --workpath out/pyi-work --specpath out/pyi-work \
     --paths "$PWD/scripts" "${hidden[@]}" "$PWD/launcher/gow3_launcher_win.py"
 cp -r out/pyi-dist/gow3-launcher/. "$share/"
 find "$share" -name __pycache__ -prune -exec rm -r {} +
-install -m755 packaging/linux/AppRun "$appdir/AppRun"
+# AppRun is static: Steam starts non-Steam games with its overlay in LD_PRELOAD, which the
+# AppImage's glibc cannot load. The static program clears that environment, then runs the script
+# that sets the data folder and the bundled libraries and starts the launcher.
+cc=${CC:-cc}
+"$cc" -O2 -Wall -Wextra -Werror -static packaging/linux/entry.c -o "$appdir/AppRun" || {
+    echo 'Building the static AppRun failed: install a C compiler and the static libc (build-essential)' >&2
+    exit 1
+}
+install -m755 packaging/linux/AppRun.sh "$appdir/AppRun.sh"
 install -m644 packaging/linux/gow3.desktop "$appdir/gow3.desktop"
 install -m644 "$icon" "$appdir/gow3.png"
+
+# No game files and nothing a player made may ship (the same rule as the Windows package).
+forbidden=$(find "$appdir" \( -iname eboot.bin -o -iname sce_module -o -iname sce_sys -o -iname savedata \
+    -o -iname user -o -iname cache -o -iname '*.log' -o -iname gow3.ini -o -iname settings.json \
+    -o -iname mods.json -o -iname patches.json -o -iname fsr4_shaders -o -iname 'nvngx_dlss*.dll' \
+    -o -iname '*.spv' -o -iname '*.pkg' -o -iname '*.sprx' -o -iname '*.prx' \) -print)
+if [[ -n $forbidden ]]; then
+    echo 'The AppImage holds files that must not ship:' >&2
+    echo "$forbidden" >&2
+    exit 1
+fi
 
 # Host-provided libraries: bundling any of these breaks drivers or the display connection.
 excluded='^(ld-linux.*|libc|libm|libdl|librt|libpthread|libresolv|libutil|libnsl|libanl|libvulkan|libGL|libGLX|libGLdispatch|libEGL|libOpenGL|libgbm|libdrm.*|libX11|libX11-xcb|libxcb.*|libXau|libXdmcp|libXext|libXfixes|libXrender|libXi|libXcursor|libXrandr|libwayland-.*|libasound|libudev|libpulse.*|libfontconfig|libfreetype|libOpenCL|libva.*|libvdpau|libvpl|libnvidia-.*|libcuda|libz|libstdc\+\+|libgcc_s)\.so'
